@@ -6,17 +6,6 @@ use std::io::{self, BufRead, BufReader, Write};
 use std::process;
 use std::io::ErrorKind;
 
-fn print_line(line: &str) {
-    if let Err(e) = writeln!(io::stdout(), "{}", line) {
-        if e.kind() == ErrorKind::BrokenPipe {
-            process::exit(0);
-        } else {
-            eprintln!("Error writing to stdout: {}", e);
-            process::exit(1);
-        }
-    }
-}
-
 fn main() {
     let args: Vec<String> = env::args().collect();
     let mut n = None;
@@ -50,7 +39,6 @@ Options:
 
 Example usage:
     cat data.txt | sample -n 20   # Sample 20 lines from data.txt"
-
                 );
                 return;
             }
@@ -66,40 +54,54 @@ Example usage:
         process::exit(1);
     });
 
-    let input: Box<dyn BufRead> = match filename {
-        Some(file) => {
+    let mut input: Box<dyn BufRead> = match filename {
+	Some(file) => {
             let f = File::open(file).unwrap_or_else(|_| {
-                eprintln!("Error: cannot open input file.");
-                process::exit(1);
+		eprintln!("Error: cannot open input file.");
+		process::exit(1);
             });
             Box::new(BufReader::new(f))
-        }
-        None => Box::new(BufReader::new(io::stdin())),
+	}
+	None => Box::new(BufReader::new(io::stdin())),
     };
-
+    
     let mut rng: StdRng = match seed {
         Some(s) => SeedableRng::seed_from_u64(s),
         None => StdRng::from_entropy(),
     };
 
+    let mut buf = String::new();
     let mut reservoir: Vec<String> = Vec::with_capacity(k);
+    let mut total = 0;
 
-    for (i, line) in input.lines().enumerate() {
-        let line = line.unwrap();
-        if i < k {
+    while input.read_line(&mut buf).unwrap_or(0) != 0 {
+        let line = buf.trim_end().to_string();
+        if total < k {
             reservoir.push(line);
         } else {
-            let j = rng.gen_range(0..=i);
+            let j = rng.gen_range(0..=total);
             if j < k {
                 reservoir[j] = line;
             }
         }
+        total += 1;
+        buf.clear();
     }
 
+    let stdout = io::stdout();
+    let mut handle = stdout.lock();
     for line in reservoir {
-        print_line(&line);
+        if let Err(e) = writeln!(handle, "{}", line) {
+            if e.kind() == ErrorKind::BrokenPipe {
+                process::exit(0);
+            } else {
+                eprintln!("Error writing to stdout: {}", e);
+                process::exit(1);
+            }
+        }
     }
 }
+
 
 #[cfg(test)]
 mod tests {
