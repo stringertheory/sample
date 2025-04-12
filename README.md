@@ -53,6 +53,8 @@ samp -n 10 --seed 17 < data.txt
 ## 🧪 Testing
 
 ```bash
+cargo clean
+cargo build # need binary for testing stdin/stderr
 cargo test
 ```
 
