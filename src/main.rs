@@ -29,7 +29,7 @@ fn main() {
             }
             "--help" | "-h" => {
                 println!(
-"Usage: sample -n <NUM> [--seed <SEED>] [FILE]
+"Usage: samp -n <NUM> [--seed <SEED>] [FILE]
 Randomly sample lines from a file or stdin using reservoir sampling.
 
 Options:
@@ -38,7 +38,7 @@ Options:
   -h, --help     Show this help message
 
 Example usage:
-    cat data.txt | sample -n 20   # Sample 20 lines from data.txt"
+    cat data.txt | samp -n 20   # Sample 20 lines from data.txt"
                 );
                 return;
             }
@@ -50,7 +50,7 @@ Example usage:
     }
 
     let k = n.unwrap_or_else(|| {
-        eprintln!("Usage: sample -n <NUM> [--seed <SEED>] [FILE]");
+        eprintln!("Usage: samp -n <NUM> [--seed <SEED>] [FILE]");
         process::exit(1);
     });
 
