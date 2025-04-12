@@ -1,13 +1,14 @@
 [package]
-name = "sample"
+name = "sample-lines"
 version = "1.0.0"
 edition = "2021"
 authors = ["Mike Stringer <mike.stringer.internet@gmail.com>"]
-description = "Sample lines without replacement in one pass without reading the input into memory."
+description = "Command-line tool to sample lines from a file or stdin without replacement. It runs in one pass without reading the whole input into memory using reservoir sampling."
 license = "MIT"
 repository = "https://github.com/stringertheory/sample"
 categories = ["command-line-utilities"]
 keywords = ["cli", "sampling", "analysis"]
+exclude = ["/.github", "/target", "/*.log"]
 
 [dependencies]
 rand = "0.8"
@@ -15,3 +16,7 @@ rand = "0.8"
 [profile.release]
 codegen-units = 1
 lto = "fat"
+
+[[bin]]
+name = "sample"
+path = "src/main.rs"

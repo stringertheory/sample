@@ -83,7 +83,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "sample"
+name = "sample-lines"
 version = "1.0.0"
 dependencies = [
  "rand",
