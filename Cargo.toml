@@ -18,5 +18,5 @@ codegen-units = 1
 lto = "fat"
 
 [[bin]]
-name = "sample"
+name = "samp"
 path = "src/main.rs"

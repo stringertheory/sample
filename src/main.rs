@@ -198,7 +198,7 @@ mod tests {
 	let expected_sample_size = 3;
 
 	// Create the Command with piped stdin
-	let mut child = Command::new("target/debug/sample")
+	let mut child = Command::new("target/debug/samp")
             .arg("-n")
             .arg(expected_sample_size.to_string())  // Pass number of samples
             .stdin(Stdio::piped())  // We need to pipe the input

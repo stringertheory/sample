@@ -1,6 +1,6 @@
-# sample
+# sample-lines
 
-`sample` is a fast, reliable command-line tool to randomly sample
+`samp` is a fast, reliable command-line tool to randomly sample
 lines from a file or standard input using [reservoir
 sampling](https://en.wikipedia.org/wiki/Reservoir_sampling). It
 samples without replacement.
@@ -12,34 +12,34 @@ Good for:
 
 ## 📦 Installation
 
-If you have Rust installed, you can install `sample` with:
+If you have Rust installed, you can install `samp` with:
 
 ```bash
-cargo install sample
+cargo install sample-lines
 ```
 
 Or build from source:
 
 ```bash
-git clone https://github.com/stringertheory/sample.git
-cd sample
+git clone https://github.com/stringertheory/sample-lines.git
+cd sample-lines
 cargo build --release
 ```
 
 ## 🚀 Usage
 
 ```bash
-sample -n <NUM> [--seed <SEED>] [FILE]
+samp -n <NUM> [--seed <SEED>] [FILE]
 ```
 
 Here are a few examples:
 
 ```bash
-sample --help
-cat data.txt | sample -n 10
-sample -n 10 data.txt
-sample -n 10 < data.txt
-sample -n 10 --seed 17 < data.txt
+samp --help
+cat data.txt | samp -n 10
+samp -n 10 data.txt
+samp -n 10 < data.txt
+samp -n 10 --seed 17 < data.txt
 ```
 
 ### Options
@@ -51,8 +51,6 @@ sample -n 10 --seed 17 < data.txt
 | `-h`, `--help` | Show help message                       |
 
 ## 🧪 Testing
-
-This project includes unit and integration tests:
 
 ```bash
 cargo test
