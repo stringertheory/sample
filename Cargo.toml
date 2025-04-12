@@ -1,0 +1,17 @@
+[package]
+name = "sample"
+version = "1.0.0"
+edition = "2021"
+authors = ["Mike Stringer <mike.stringer.internet@gmail.com>"]
+description = "Sample lines without replacement in one pass without reading the input into memory."
+license = "MIT"
+repository = "https://github.com/stringertheory/sample"
+categories = ["command-line-utilities"]
+keywords = ["cli", "sampling", "analysis"]
+
+[dependencies]
+rand = "0.8"
+
+[profile.release]
+codegen-units = 1
+lto = "fat"
