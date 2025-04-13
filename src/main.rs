@@ -5,10 +5,12 @@ use std::fs::File;
 use std::io::ErrorKind;
 use std::io::{self, BufRead, BufReader, Write};
 use std::process;
+use std::str::FromStr;
 
 /// Configuration for the sampling program
 struct Config {
-    sample_size: usize,
+    sample_size: Option<usize>,
+    rate: Option<f64>,
     seed: Option<u64>,
     filename: Option<String>,
     preserve_headers: Option<usize>,
@@ -36,6 +38,21 @@ where
     Ok(reservoir)
 }
 
+/// Perform probability-based sampling on lines from an iterator
+fn probability_sample<I>(lines: I, p: f64, mut rng: StdRng) -> io::Result<Vec<String>>
+where
+    I: Iterator<Item = Result<String, io::Error>>,
+{
+    let mut sampled = Vec::new();
+    for line_result in lines {
+        let line = line_result?;
+        if rng.gen::<f64>() < p {
+            sampled.push(line);
+        }
+    }
+    Ok(sampled)
+}
+
 /// Write sampled lines to stdout, handling broken pipes gracefully
 fn write_results(lines: Vec<String>) -> io::Result<()> {
     let stdout = io::stdout();
@@ -49,22 +66,37 @@ fn write_results(lines: Vec<String>) -> io::Result<()> {
         }
     }
 
-    handle.flush()?;
     Ok(())
 }
 
 /// Parse command line arguments using clap
 fn parse_args() -> Config {
     let matches = Command::new("samp")
-        .version(env!("CARGO_PKG_VERSION"))
-        .about("Randomly sample lines from a file or stdin using reservoir sampling")
+        .about("Randomly sample lines from a file or stdin")
         .arg(
             Arg::new("sample_size")
                 .short('n')
+                .long("number")
                 .value_name("NUM")
-                .help("Number of lines to sample (required)")
-                .required(true)
+                .help("Number of lines to sample (mutually exclusive with -r)")
+                .conflicts_with("rate")
                 .value_parser(clap::value_parser!(usize)),
+        )
+        .arg(
+            Arg::new("rate")
+                .short('r')
+                .long("rate")
+                .value_name("RATE")
+                .help("Probability of keeping a line (e.g., 0.05 means 5%)")
+                .conflicts_with("sample_size")
+                .value_parser(|s: &str| {
+                    let value = f64::from_str(s).map_err(|_| String::from("Must be a float"))?;
+                    if (0.0..=1.0).contains(&value) {
+                        Ok(value)
+                    } else {
+                        Err(String::from("Rate must be between 0.0 and 1.0"))
+                    }
+                }),
         )
         .arg(
             Arg::new("seed")
@@ -93,23 +125,21 @@ fn parse_args() -> Config {
         )
         .after_help(
             "Example usage:
-    cat data.txt | samp -n 20   # Sample 20 lines from data.txt",
+    samp -n 10 file.txt
+    samp -r 0.05 < file.txt",
         )
         .get_matches();
 
-    let preserve_headers = if matches.contains_id("preserve_headers") {
-        Some(
-            matches
-                .get_one::<usize>("preserve_headers")
-                .copied()
-                .unwrap_or(1),
-        )
-    } else {
-        None
-    };
+    let preserve_headers = matches.get_raw("preserve_headers").map(|_| {
+        matches
+            .get_one::<usize>("preserve_headers")
+            .copied()
+            .unwrap_or(1)
+    });
 
     Config {
-        sample_size: *matches.get_one::<usize>("sample_size").unwrap(),
+        sample_size: matches.get_one::<usize>("sample_size").copied(),
+        rate: matches.get_one::<f64>("rate").copied(),
         seed: matches.get_one::<u64>("seed").copied(),
         filename: matches.get_one::<String>("file").cloned(),
         preserve_headers,
@@ -118,6 +148,11 @@ fn parse_args() -> Config {
 
 fn main() -> io::Result<()> {
     let config = parse_args();
+
+    if config.sample_size.is_none() && config.rate.is_none() {
+        eprintln!("Error: Must specify either -n <NUM> or -r <RATE>");
+        process::exit(1);
+    }
 
     // Set up the input source
     let reader: Box<dyn BufRead> = match &config.filename {
@@ -136,7 +171,7 @@ fn main() -> io::Result<()> {
 
     let mut lines = reader.lines();
 
-    // Handle preserved headers
+    // Output preserved headers
     if let Some(num_headers) = config.preserve_headers {
         for _ in 0..num_headers {
             match lines.next() {
@@ -145,18 +180,26 @@ fn main() -> io::Result<()> {
                     eprintln!("Error reading input: {}", e);
                     process::exit(1);
                 }
-                None => return Ok(()),
+                None => return Ok(()), // fewer lines than headers
             }
         }
     }
 
     let rng = match config.seed {
-        Some(s) => StdRng::seed_from_u64(s),
+        Some(seed) => StdRng::seed_from_u64(seed),
         None => StdRng::from_entropy(),
     };
 
-    let samples = reservoir_sample(lines, config.sample_size, rng)?;
-    write_results(samples)?;
+    // Dispatch to appropriate sampling method
+    let result = if let Some(k) = config.sample_size {
+        reservoir_sample(lines, k, rng)?
+    } else if let Some(p) = config.rate {
+        probability_sample(lines, p, rng)?
+    } else {
+        unreachable!() // We've already checked that one must be set
+    };
+
+    write_results(result)?;
 
     Ok(())
 }
@@ -370,5 +413,202 @@ mod tests {
         for line in result_lines {
             assert!(input_data.contains(line));
         }
+    }
+
+    #[test]
+    fn test_probability_sample_reproducibility() {
+        let input_data = "a\nb\nc\nd\ne\nf\ng\nh\n";
+        let expected_output = vec!["b", "f", "g"];
+        let exe_path = find_executable();
+
+        let mut child = Command::new(&exe_path)
+            .arg("-r")
+            .arg("0.5")
+            .arg("-s")
+            .arg("17")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("Failed to execute process");
+
+        {
+            let mut stdin = child.stdin.take().expect("Failed to open stdin");
+            stdin.write_all(input_data.as_bytes()).unwrap();
+        }
+
+        let output = child.wait_with_output().expect("Failed to wait on child");
+        let result = String::from_utf8_lossy(&output.stdout);
+        let result_lines: Vec<&str> = result.lines().collect();
+
+        assert_eq!(result_lines, expected_output);
+    }
+
+    #[test]
+    fn test_probability_sample_with_headers() {
+        let input_data = "HEADER1\nHEADER2\na\nb\nc\nd\ne\n";
+        let exe_path = find_executable();
+
+        let mut child = Command::new(&exe_path)
+            .arg("-r")
+            .arg("0.6")
+            .arg("-p")
+            .arg("2")
+            .arg("-s")
+            .arg("17")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("Failed to execute process");
+
+        {
+            let mut stdin = child.stdin.take().expect("Failed to open stdin");
+            stdin.write_all(input_data.as_bytes()).unwrap();
+        }
+
+        let output = child.wait_with_output().expect("Failed to wait on child");
+        let result = String::from_utf8_lossy(&output.stdout);
+        let mut lines = result.lines();
+
+        // Check headers are preserved
+        assert_eq!(lines.next(), Some("HEADER1"));
+        assert_eq!(lines.next(), Some("HEADER2"));
+
+        // Remaining lines are sampled — we don’t assert exact values since probability is involved,
+        // but we can check they are a subset of the remaining input
+        let sampled: Vec<&str> = lines.collect();
+        let valid_lines = ["a", "b", "c", "d", "e"];
+        for line in &sampled {
+            assert!(
+                valid_lines.contains(line),
+                "Sampled line '{}' not in valid input set",
+                line
+            );
+        }
+    }
+
+    #[test]
+    fn test_probability_sample_stdin_only() {
+        let input_data = "x\ny\nz\n";
+        let exe_path = find_executable();
+
+        let mut child = Command::new(&exe_path)
+            .arg("-r")
+            .arg("1.0") // Ensure all lines are selected
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("Failed to execute process");
+
+        {
+            let mut stdin = child.stdin.take().expect("Failed to open stdin");
+            stdin.write_all(input_data.as_bytes()).unwrap();
+        }
+
+        let output = child.wait_with_output().expect("Failed to wait on child");
+        let result = String::from_utf8_lossy(&output.stdout);
+        let result_lines: Vec<&str> = result.lines().collect();
+
+        let expected: Vec<&str> = input_data.lines().collect();
+        assert_eq!(result_lines, expected);
+    }
+
+    #[test]
+    fn test_probability_sample_rate_zero() {
+        let input_data = "a\nb\nc\nd\n";
+        let exe_path = find_executable();
+
+        let mut child = Command::new(&exe_path)
+            .arg("-r")
+            .arg("0.0")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("Failed to execute process");
+
+        {
+            let mut stdin = child.stdin.take().expect("Failed to open stdin");
+            stdin.write_all(input_data.as_bytes()).unwrap();
+        }
+
+        let output = child.wait_with_output().expect("Failed to wait on child");
+        let result = String::from_utf8_lossy(&output.stdout);
+        let result_lines: Vec<&str> = result.lines().collect();
+
+        assert!(
+            result_lines.is_empty(),
+            "Expected no output, got {:?}",
+            result_lines
+        );
+    }
+
+    #[test]
+    fn test_probability_sample_rate_one() {
+        let input_data = "x\ny\nz\n";
+        let exe_path = find_executable();
+
+        let mut child = Command::new(&exe_path)
+            .arg("-r")
+            .arg("1.0")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("Failed to execute process");
+
+        {
+            let mut stdin = child.stdin.take().expect("Failed to open stdin");
+            stdin.write_all(input_data.as_bytes()).unwrap();
+        }
+
+        let output = child.wait_with_output().expect("Failed to wait on child");
+        let result = String::from_utf8_lossy(&output.stdout);
+        let result_lines: Vec<&str> = result.lines().collect();
+
+        let expected: Vec<&str> = input_data.lines().collect();
+        assert_eq!(result_lines, expected, "Expected all lines to be sampled");
+    }
+
+    #[test]
+    fn test_probability_sample_invalid_rate_negative() {
+        let exe_path = find_executable();
+
+        let output = Command::new(&exe_path)
+            .arg("-r=-0.1")
+            .output()
+            .expect("Failed to execute process");
+
+        assert!(
+            !output.status.success(),
+            "Expected failure for negative rate, got success"
+        );
+
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("Rate must be between 0.0 and 1.0"),
+            "Unexpected stderr: {}",
+            stderr
+        );
+    }
+
+    #[test]
+    fn test_probability_sample_invalid_rate_too_large() {
+        let exe_path = find_executable();
+
+        let output = Command::new(&exe_path)
+            .arg("-r")
+            .arg("1.5")
+            .output()
+            .expect("Failed to execute process");
+
+        assert!(
+            !output.status.success(),
+            "Expected failure for rate > 1.0, got success"
+        );
+
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("Rate must be between 0.0 and 1.0"),
+            "Unexpected stderr: {}",
+            stderr
+        );
     }
 }

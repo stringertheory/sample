@@ -43,20 +43,23 @@ samp -n <NUM> [--seed <SEED>] [FILE]
 Here are a few examples:
 
 ```bash
-samp --help
-cat data.txt | samp -n 10
-samp -n 10 data.txt
-samp -n 10 < data.txt
-samp -n 10 --seed 17 < data.txt
-cat data.csv | samp -n 10 --preserve-headers
+samp --help                                   # Show help
+cat data.txt | samp -n 10                     # Keep 10 lines, with pipe
+samp -n 10 data.txt                           # Giving filename
+samp -n 10 < data.txt                         # Standard in
+samp -n 10 --seed 17 < data.txt               # Reproducible sample
+cat data.csv | samp -n 10 --preserve-headers  # Preserve 1 header line
+samp -r 0.01 < big.log                        # Keep ~1% of lines
+samp -r 0.10 --seed 17 data.csv -p            # Reproducible 10% sample
 ```
 
 ### Options
 
 | Option | Description |
 |--------|-------------|
-| `-n <NUM>` | Number of lines to sample (**required**) |
-| `--seed <SEED>` | Optional seed for reproducible sampling |
+| `-n, --number <NUM>` | Number of lines to sample (**required**) |
+| `-r, --rate <RATE>` | Sampling rate: probability to include each line (e.g., 0.05) |
+| `-s, --seed <SEED>` | Optional seed for reproducible sampling |
 | `-p, --preserve-headers [N]` | Preserve the first `N` lines as headers (default: 1 if flag is used) |
 | `-h`, `--help` | Show help message |
 | `--version` | Show the version number |
