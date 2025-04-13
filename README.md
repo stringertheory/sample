@@ -55,9 +55,11 @@ samp -r 0.10 --seed 17 data.csv -p            # Reproducible 10% sample
 
 ### Options
 
+One of `--number` or `--rate` is **required**, but you can not pass both.
+
 | Option | Description |
 |--------|-------------|
-| `-n, --number <NUM>` | Number of lines to sample (**required**) |
+| `-n, --number <NUM>` | Number of lines to sample |
 | `-r, --rate <RATE>` | Sampling rate: probability to include each line (e.g., 0.05) |
 | `-s, --seed <SEED>` | Optional seed for reproducible sampling |
 | `-p, --preserve-headers [N]` | Preserve the first `N` lines as headers (default: 1 if flag is used) |
