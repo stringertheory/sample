@@ -43,6 +43,14 @@ samp -n 10 --seed 17 < data.txt
 cat data.csv | samp -n 10 --preserve-headers
 ```
 
+You can think of `samp` kind of like `head` or `tail`, for example:
+
+```bash
+head -n 10 < data.txt   # outputs 10 first lines
+tail -n 10 < data.txt   # outputs 10 last lines
+samp -n 10 < data.txt   # outputs 10 random lines
+```
+
 ### Options
 
 | Option | Description |
