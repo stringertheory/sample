@@ -10,6 +10,14 @@ Good for:
 - Sampling logs for debugging
 - Creating reproducible random subsets of data
 
+You can think of `samp` kind of like `head` or `tail`, for example:
+
+```bash
+head -n 10 < data.txt   # outputs 10 first lines
+tail -n 10 < data.txt   # outputs 10 last lines
+samp -n 10 < data.txt   # outputs 10 random lines
+```
+
 ## Installation
 
 If you have Rust installed, you can install `samp` with:
@@ -41,14 +49,6 @@ samp -n 10 data.txt
 samp -n 10 < data.txt
 samp -n 10 --seed 17 < data.txt
 cat data.csv | samp -n 10 --preserve-headers
-```
-
-You can think of `samp` kind of like `head` or `tail`, for example:
-
-```bash
-head -n 10 < data.txt   # outputs 10 first lines
-tail -n 10 < data.txt   # outputs 10 last lines
-samp -n 10 < data.txt   # outputs 10 random lines
 ```
 
 ### Options
