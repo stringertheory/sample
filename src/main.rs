@@ -11,30 +11,18 @@ struct Config {
     sample_size: usize,
     seed: Option<u64>,
     filename: Option<String>,
+    preserve_headers: Option<usize>,
 }
 
-/// Perform reservoir sampling on lines from a reader
-///
-/// # Arguments
-///
-/// * `reader` - A source of lines to sample from
-/// * `k` - Number of lines to sample
-/// * `rng` - Random number generator to use
-///
-/// # Returns
-///
-/// A vector containing the sampled lines
-fn reservoir_sample<R: BufRead>(
-    mut reader: R,
-    k: usize,
-    mut rng: StdRng,
-) -> io::Result<Vec<String>> {
-    let mut buf = String::new();
+/// Perform reservoir sampling on lines from an iterator
+fn reservoir_sample<I>(lines: I, k: usize, mut rng: StdRng) -> io::Result<Vec<String>>
+where
+    I: Iterator<Item = Result<String, io::Error>>,
+{
     let mut reservoir: Vec<String> = Vec::with_capacity(k);
-    let mut total = 0;
 
-    while reader.read_line(&mut buf)? > 0 {
-        let line = buf.trim_end().to_string();
+    for (total, line_result) in lines.enumerate() {
+        let line = line_result?;
         if total < k {
             reservoir.push(line);
         } else {
@@ -43,8 +31,6 @@ fn reservoir_sample<R: BufRead>(
                 reservoir[j] = line;
             }
         }
-        total += 1;
-        buf.clear();
     }
 
     Ok(reservoir)
@@ -63,12 +49,14 @@ fn write_results(lines: Vec<String>) -> io::Result<()> {
         }
     }
 
+    handle.flush()?;
     Ok(())
 }
 
 /// Parse command line arguments using clap
 fn parse_args() -> Config {
     let matches = Command::new("samp")
+        .version(env!("CARGO_PKG_VERSION"))
         .about("Randomly sample lines from a file or stdin using reservoir sampling")
         .arg(
             Arg::new("sample_size")
@@ -87,6 +75,17 @@ fn parse_args() -> Config {
                 .value_parser(clap::value_parser!(u64)),
         )
         .arg(
+            Arg::new("preserve_headers")
+                .short('p')
+                .long("preserve-headers")
+                .num_args(0..=1)
+                .value_name("NUM")
+                .help(
+                    "Number of header lines to preserve (default: 1 if specified without a value)",
+                )
+                .value_parser(clap::value_parser!(usize)),
+        )
+        .arg(
             Arg::new("file")
                 .value_name("FILE")
                 .help("Input file (reads from stdin if not provided)")
@@ -98,10 +97,22 @@ fn parse_args() -> Config {
         )
         .get_matches();
 
+    let preserve_headers = if matches.contains_id("preserve_headers") {
+        Some(
+            matches
+                .get_one::<usize>("preserve_headers")
+                .copied()
+                .unwrap_or(1),
+        )
+    } else {
+        None
+    };
+
     Config {
         sample_size: *matches.get_one::<usize>("sample_size").unwrap(),
         seed: matches.get_one::<u64>("seed").copied(),
         filename: matches.get_one::<String>("file").cloned(),
+        preserve_headers,
     }
 }
 
@@ -111,7 +122,6 @@ fn main() -> io::Result<()> {
     // Set up the input source
     let reader: Box<dyn BufRead> = match &config.filename {
         Some(file) => {
-            // Instead of using map_err with process::exit
             let f = match File::open(file) {
                 Ok(file) => file,
                 Err(e) => {
@@ -124,16 +134,28 @@ fn main() -> io::Result<()> {
         None => Box::new(BufReader::new(io::stdin())),
     };
 
-    // Initialize RNG
+    let mut lines = reader.lines();
+
+    // Handle preserved headers
+    if let Some(num_headers) = config.preserve_headers {
+        for _ in 0..num_headers {
+            match lines.next() {
+                Some(Ok(line)) => println!("{}", line),
+                Some(Err(e)) => {
+                    eprintln!("Error reading input: {}", e);
+                    process::exit(1);
+                }
+                None => return Ok(()),
+            }
+        }
+    }
+
     let rng = match config.seed {
         Some(s) => StdRng::seed_from_u64(s),
         None => StdRng::from_entropy(),
     };
 
-    // Perform the sampling
-    let samples = reservoir_sample(reader, config.sample_size, rng)?;
-
-    // Output the results
+    let samples = reservoir_sample(lines, config.sample_size, rng)?;
     write_results(samples)?;
 
     Ok(())
@@ -143,24 +165,16 @@ fn main() -> io::Result<()> {
 mod tests {
     use super::*;
     use std::collections::HashSet;
-    use std::io::Cursor;
-    use std::io::Read;
-    use std::io::Write;
+    use std::io::{Cursor, Read, Write};
     use std::path::PathBuf;
     use std::process::{Command, Stdio};
     use tempfile::NamedTempFile;
 
-    // Helper function to find the executable path
     fn find_executable() -> PathBuf {
-        // Try different common locations for the binary
         let possible_locations = [
-            // Regular debug build location
             PathBuf::from("target/debug/samp"),
-            // Release build location
             PathBuf::from("target/release/samp"),
-            // Current directory with bin extension (Windows)
             PathBuf::from("samp.exe"),
-            // Current directory
             PathBuf::from("samp"),
         ];
 
@@ -170,12 +184,10 @@ mod tests {
             }
         }
 
-        // If we can't find it, use the first option and let the test fail with a clear error
         eprintln!("Warning: Executable not found in common locations. Tests might fail.");
         possible_locations[0].clone()
     }
 
-    // Unit tests for core algorithm
     #[test]
     fn test_reservoir_sampling_properties() {
         let input_data = "a\nb\nc\nd\ne\nf\ng\nh\ni\nj\n";
@@ -185,58 +197,80 @@ mod tests {
         let run_sample = || {
             let reader = Cursor::new(input_data);
             let rng = StdRng::seed_from_u64(seed);
-            reservoir_sample(reader, k, rng).unwrap()
+            reservoir_sample(reader.lines(), k, rng).unwrap()
         };
 
-        // Run the sampler twice with the same seed
         let sample1 = run_sample();
         let sample2 = run_sample();
 
-        // Check: correct sample size
         assert_eq!(sample1.len(), k);
         assert_eq!(sample2.len(), k);
 
-        // Check: all items are from the original data
         let input_set: HashSet<_> = input_data.lines().collect();
         for item in &sample1 {
             assert!(input_set.contains(&item.as_str()));
         }
 
-        // Check: samples match with same seed
         assert_eq!(sample1, sample2);
     }
 
     #[test]
     fn test_k_greater_than_input_len() {
         let input_data = "a\nb\nc\nd\n";
-        let k = 6; // Greater than the input length
-        let seed = 42;
+        let k = 6;
+        let seed = 17;
 
         let reader = Cursor::new(input_data);
         let rng = StdRng::seed_from_u64(seed);
-        let sample = reservoir_sample(reader, k, rng).unwrap();
+        let sample = reservoir_sample(reader.lines(), k, rng).unwrap();
 
-        // Ensure we only get the available lines (input_len is 4, we asked for 6)
         let input_lines: Vec<_> = input_data.lines().collect();
         assert_eq!(sample.len(), input_lines.len());
 
-        // Check that all input lines are in the sample
         let sample_set: HashSet<_> = sample.iter().collect();
         for line in input_lines {
             assert!(sample_set.contains(&line.to_string()));
         }
     }
 
-    // Integration tests using actual processes
+    #[test]
+    fn test_preserve_headers() {
+        let input = "h1\nh2\na\nb\nc\nd\n";
+        let exe_path = find_executable();
+
+        let output = Command::new(&exe_path)
+            .arg("-n")
+            .arg("2")
+            .arg("-p")
+            .arg("2")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .and_then(|mut child| {
+                child.stdin.as_mut().unwrap().write_all(input.as_bytes())?;
+                child.wait_with_output()
+            })
+            .expect("Failed to run samp");
+
+        let result = String::from_utf8_lossy(&output.stdout);
+        let mut lines = result.lines();
+
+        assert_eq!(lines.next(), Some("h1"));
+        assert_eq!(lines.next(), Some("h2"));
+
+        let sampled: Vec<&str> = lines.collect();
+        assert_eq!(sampled.len(), 2);
+        for &line in &sampled {
+            assert!(input.contains(line));
+        }
+    }
+
     #[test]
     fn test_stdin_behavior() {
         let input_data = "a\nb\nc\nd\ne\n";
         let expected_sample_size = 3;
-
-        // Get the path to the executable
         let exe_path = find_executable();
 
-        // Create the Command with piped stdin
         let mut child = Command::new(&exe_path)
             .arg("-n")
             .arg(expected_sample_size.to_string())
@@ -245,22 +279,15 @@ mod tests {
             .spawn()
             .expect("Failed to execute process");
 
-        // Write to stdin
         let mut stdin = child.stdin.take().expect("Failed to open stdin");
         stdin.write_all(input_data.as_bytes()).unwrap();
-        drop(stdin); // Close stdin to signal end of input
+        drop(stdin);
 
-        // Wait for the command to finish and capture output
         let output = child.wait_with_output().expect("Failed to wait on child");
-
-        // Capture stdout as a string
         let result = String::from_utf8_lossy(&output.stdout);
-
-        // Verify that the output is the correct length
         let result_lines: Vec<&str> = result.lines().collect();
-        assert_eq!(result_lines.len(), expected_sample_size);
 
-        // Ensure all sampled lines came from the input
+        assert_eq!(result_lines.len(), expected_sample_size);
         for line in result_lines {
             assert!(input_data.contains(line));
         }
@@ -270,11 +297,8 @@ mod tests {
     fn test_pipeline_behavior() {
         let input_data = "a\nb\nc\nd\ne\n";
         let sample_size = 4;
-
-        // Get the path to the executable
         let exe_path = find_executable();
 
-        // First setup - run without head
         let mut child_normal = Command::new(&exe_path)
             .arg("-n")
             .arg(sample_size.to_string())
@@ -295,7 +319,6 @@ mod tests {
         let normal_lines = normal_result.lines().count();
         assert_eq!(normal_lines, sample_size);
 
-        // Second setup - pipe through head to test broken pipe handling
         let mut child_with_head = Command::new(&exe_path)
             .arg("-n")
             .arg(sample_size.to_string())
@@ -309,26 +332,21 @@ mod tests {
             stdin.write_all(input_data.as_bytes()).unwrap();
         }
 
-        // Read just the first part of stdout to simulate a broken pipe
         let mut stdout = child_with_head
             .stdout
             .take()
             .expect("Failed to open stdout");
-        let mut buf = [0u8; 10]; // Read just a few bytes
+        let mut buf = [0u8; 10];
         stdout.read(&mut buf).expect("Failed to read from stdout");
-        drop(stdout); // Close stdout to simulate broken pipe
+        drop(stdout);
 
-        // The program should exit gracefully with status 0 when pipe is broken
         let status = child_with_head.wait().expect("Failed to wait on child");
         assert!(status.success());
     }
 
     #[test]
     fn test_file_input() {
-        // Get the path to the executable
         let exe_path = find_executable();
-
-        // Create a temporary file with test data
         let mut temp_file = NamedTempFile::new().expect("Failed to create temp file");
         let input_data = "line1\nline2\nline3\nline4\nline5\n";
         temp_file
@@ -336,12 +354,11 @@ mod tests {
             .expect("Failed to write to temp file");
         let temp_path = temp_file.path().to_str().unwrap();
 
-        // Run samp on the file
         let output = Command::new(&exe_path)
             .arg("-n")
             .arg("3")
             .arg("--seed")
-            .arg("42") // For deterministic output
+            .arg("17")
             .arg(temp_path)
             .output()
             .expect("Failed to execute process");
@@ -349,10 +366,7 @@ mod tests {
         let result = String::from_utf8_lossy(&output.stdout);
         let result_lines: Vec<&str> = result.lines().collect();
 
-        // Check that we got exactly 3 lines
         assert_eq!(result_lines.len(), 3);
-
-        // Check that all lines are from the input file
         for line in result_lines {
             assert!(input_data.contains(line));
         }

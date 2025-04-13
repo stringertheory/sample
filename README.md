@@ -40,15 +40,18 @@ cat data.txt | samp -n 10
 samp -n 10 data.txt
 samp -n 10 < data.txt
 samp -n 10 --seed 17 < data.txt
+cat data.csv | samp -n 10 --preserve-headers
 ```
 
 ### Options
 
-| Option        | Description                             |
-|---------------|-----------------------------------------|
-| `-n <NUM>`     | Number of lines to sample (**required**) |
-| `--seed <SEED>`| Optional seed for reproducible sampling |
-| `-h`, `--help` | Show help message                       |
+| Option | Description |
+|--------|-------------|
+| `-n <NUM>` | Number of lines to sample (**required**) |
+| `--seed <SEED>` | Optional seed for reproducible sampling |
+| `-p, --preserve-headers [N]` | Preserve the first `N` lines as headers (default: 1 if flag is used) |
+| `-h`, `--help` | Show help message |
+| `--version` | Show the version number |
 
 ## Testing
 
